@@ -358,7 +358,7 @@ def main():
                 })
 
     out = pd.DataFrame(rows)
-    outpath = DATA_DIR / "path_schedule_solution_summary.csv"
+    outpath = "./output/path_schedule_solution_summary.csv"
     out.to_csv(outpath, index=False)
     print(f"\nSaved summary to {outpath}")
 
@@ -412,7 +412,7 @@ def main():
     compute_metrics(sun_periods, sun_sol, "Sunday")
 
     metrics_df = pd.DataFrame(rows_metrics)
-    out_metrics = DATA_DIR / "path_schedule_performance_metrics.csv"
+    out_metrics = "./output/path_schedule_performance_metrics.csv"
     metrics_df.to_csv(out_metrics, index=False)
     print(f"Saved performance metrics to {out_metrics}")
 

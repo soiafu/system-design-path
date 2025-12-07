@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 # -------------------------------
 # Load optimized metrics
 # -------------------------------
-metrics = pd.read_csv("./data/path_schedule_performance_metrics.csv")
+metrics = pd.read_csv("./output/path_schedule_performance_metrics.csv")
 
 # -------------------------------
 # ENTER YOUR BENCHMARK HERE
