@@ -274,6 +274,13 @@ def build_and_solve(period_demands, day_name="Saturday", pwl_points=8, verbose=T
             m.addConstr(E[L, t] >= seats_ph_expr - demand_ph, name=f"empty_def_{L}_{t}")
             m.addConstr(E[L, t] >= 0, name=f"empty_nonneg_{L}_{t}")
 
+            # UTILIZATION CAP: demand_per_hour ≤ 80% of seats_per_hour
+            m.addConstr(
+                demand_ph <= 0.80 * seats_ph_expr,
+                name=f"util_cap_{L}_{t}"
+            )
+
+
             # PWL: W = 1/f => W(f) = 1/f. Use breakpoints between f_lo and f_hi
             # create breakpoints (avoid f very close to zero, bounded by f_lo/f_hi)
             xs = np.linspace(f_lo, f_hi, pwl_points)
