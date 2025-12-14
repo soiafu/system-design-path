@@ -129,3 +129,121 @@ plt.savefig(save_path, dpi=300)
 plt.close()
 
 print(f"Charts successfully generated and saved to: {save_path}")
+
+# =====================================================
+# 5. WAIT TIME COMPARISON PLOT (NEW FIGURE)
+# =====================================================
+
+# Compute wait times (minutes)
+BENCH_FREQ = 3.0  # must match benchmark assumption
+
+df["Bench_Wait_Min"] = 60.0 / (2.0 * BENCH_FREQ)
+df["Opt_Wait_Min"] = 60.0 / (2.0 * df["Opt_Freq"])
+
+df = df.dropna(subset=["Bench_Wait_Min", "Opt_Wait_Min"])
+
+# Y-axis upper bound
+wait_ymax = max(df["Bench_Wait_Min"].max(), df["Opt_Wait_Min"].max()) * 1.25
+
+fig, axes = plt.subplots(
+    n_lines, n_days,
+    figsize=(5 * n_days + 2, 4 * n_lines),
+    sharey=True
+)
+
+if n_lines == 1 and n_days == 1:
+    axes = [[axes]]
+elif n_lines == 1:
+    axes = [axes]
+elif n_days == 1:
+    axes = [[ax] for ax in axes]
+
+print("Generating wait time comparison charts...")
+
+for i, line in enumerate(lines):
+    for j, day in enumerate(days):
+        ax = axes[i][j]
+
+        data = df[(df[col_line] == line) & (df[col_day] == day)].sort_values(by=col_period)
+
+        if data.empty:
+            ax.text(0.5, 0.5, "No Data", ha='center', va='center')
+            continue
+
+        x = range(len(data))
+
+        # Color Logic (same as utilization)
+        if "NWK" in line or "WTC" in line:
+            c_bench = '#ffcccc'
+            c_opt = '#cc0000'
+        else:
+            c_bench = '#add8e6'
+            c_opt = '#4682b4'
+
+        rects1 = ax.bar(
+            [k - bar_width / 2 for k in x],
+            data["Bench_Wait_Min"],
+            width=bar_width,
+            label="Benchmark",
+            color=c_bench
+        )
+
+        rects2 = ax.bar(
+            [k + bar_width / 2 for k in x],
+            data["Opt_Wait_Min"],
+            width=bar_width,
+            label="Optimized",
+            color=c_opt
+        )
+
+        ax.set_title(f"{line} - {day}", fontsize=12, fontweight="bold")
+        ax.set_xticks(x)
+        ax.set_xticklabels(data[col_period])
+
+        if j == 0:
+            ax.set_ylabel("Average Wait Time (min)")
+
+        ax.set_ylim(0, wait_ymax)
+        ax.grid(axis="y", linestyle="--", alpha=0.5)
+
+        # Label bars
+        def add_wait_labels(rects):
+            for r in rects:
+                h = r.get_height()
+                ax.annotate(
+                    f"{h:.1f}",
+                    xy=(r.get_x() + r.get_width() / 2, h),
+                    xytext=(0, 3),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                    fontweight="bold"
+                )
+
+        add_wait_labels(rects1)
+        add_wait_labels(rects2)
+
+# Legend & layout
+handles, labels = axes[0][0].get_legend_handles_labels()
+fig.legend(
+    handles, labels,
+    loc="upper center",
+    ncol=2,
+    bbox_to_anchor=(0.5, 0.98),
+    fontsize=11
+)
+
+plt.suptitle(
+    "Comparison of Average Passenger Wait Time: Benchmark vs. Optimized",
+    fontsize=16,
+    y=0.99
+)
+
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+
+wait_save_path = os.path.join(OUTPUT_DIR, "wait_time_comparison_labeled.png")
+plt.savefig(wait_save_path, dpi=300)
+plt.close()
+
+print(f"Wait time charts successfully generated and saved to: {wait_save_path}")

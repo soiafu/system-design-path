@@ -23,9 +23,9 @@ SAT_FILE = DATA_DIR / "Predicted_demand_saturday.xlsx"
 SUN_FILE = DATA_DIR / "Predicted_demand_sunday.xlsx"
 
 # Lines and parameters (edit to match your system)
-LINES = ["NWK−WTC", "JSQ−33st", "HOB−33st"]
+LINES = ["NWK−WTC", "JSQ−33st", "HOB−WTC"]
 
-T_cycle = {"NWK−WTC": 1.5, "JSQ−33st": 2.0, "HOB−33st": 1.2}  # hours per round trip
+T_cycle = {"NWK−WTC": 1.5, "JSQ−33st": 2.0, "HOB−WTC": 1.2}  # hours per round trip
 K_car = 110  # seats per car
 Y_max = 422  # fleet cars available
 C_cost = 154.0  # $ per car-hour
@@ -205,8 +205,23 @@ def aggregate_od_to_line_demands(od_df, od_to_line):
 # MODEL BUILDING (linearized)
 # -------------------------
 def build_and_solve(period_demands, day_name="Saturday", pwl_points=8, verbose=True):
+
+    # --- LINE-SPECIFIC MIN/MAX CAR LENGTHS ---
+    MIN_CARS = {
+        "NWK−WTC": 8,
+        "JSQ−33st": 6,
+        "HOB−WTC": 8,
+    }
+    MAX_CARS = {
+        "NWK−WTC": 10,
+        "JSQ−33st": 10,
+        "HOB−WTC": 10,
+    }
+
+    # -----------------------------------------
     od_to_line = load_od_to_line(OD_TO_LINE_CSV)
-    demand_lt = {t: aggregate_od_to_line_demands(period_demands[t], od_to_line) for t in TIME_PERIODS}
+    demand_lt = {t: aggregate_od_to_line_demands(period_demands[t], od_to_line) 
+                 for t in TIME_PERIODS}
 
     m = gp.Model(f"PATH_{day_name}")
     if not verbose:
@@ -218,120 +233,141 @@ def build_and_solve(period_demands, day_name="Saturday", pwl_points=8, verbose=T
     N_max_by_line = {L: int(math.ceil(f_hi * T_cycle[L])) for L in LINES}
 
     # Variables
-    N = {}               # integer number of trains (concurrent) in period (or per cycle)
-    f = {}               # frequency (trains/hour)
-    # We'll represent C by binaries z_{k} (one-hot) per (L,t)
-    z = {}               # binary selection for car length k
-    Y = {}               # Y_{k} = N * z_k  (integer or continuous) used to linearize N*C
-    E = {}               # empty seats per hour (nonnegative)
-    W = {}               # w = 1/f (PWL variable) to compute waiting time
+    N = {}
+    f = {}
+    z = {}
+    Y = {}
+    E = {}
+    W = {}
 
+    # ----------------------
+    # Create Variables
+    # ----------------------
     for L in LINES:
         for t in TIME_PERIODS:
             name = f"{L}_{t}"
-            N[L, t] = m.addVar(vtype=GRB.INTEGER, name=f"N_{name}", lb=0, ub=N_max_by_line[L])
-            f[L, t] = m.addVar(vtype=GRB.CONTINUOUS, name=f"f_{name}", lb=f_lo, ub=f_hi)
-            # one-hot binaries for length
-            for k in LEN_OPTIONS:
-                z[L, t, k] = m.addVar(vtype=GRB.BINARY, name=f"z_{name}_{k}")
-            # product vars Y_k = N * z_k (continuous, domain 0..N_max)
-            for k in LEN_OPTIONS:
-                Y[L, t, k] = m.addVar(vtype=GRB.CONTINUOUS, lb=0, ub=N_max_by_line[L], name=f"Y_{name}_{k}")
-            E[L, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0.0, name=f"E_{name}")
-            W[L, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=1.0 / f_hi, ub=1.0 / f_lo, name=f"W_{name}")  # w approx 1/f
+            allowed_k = range(MIN_CARS[L], MAX_CARS[L] + 1)
 
+            N[L, t] = m.addVar(vtype=GRB.INTEGER, lb=0, 
+                               ub=N_max_by_line[L], name=f"N_{name}")
+            f[L, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=f_lo, ub=f_hi, name=f"f_{name}")
+            E[L, t] = m.addVar(vtype=GRB.CONTINUOUS, lb=0.0, name=f"E_{name}")
+            W[L, t] = m.addVar(vtype=GRB.CONTINUOUS, 
+                               lb=1.0 / f_hi, ub=1.0 / f_lo, name=f"W_{name}")
+
+            # Length selectors & linearization products
+            for k in allowed_k:
+                z[L, t, k] = m.addVar(vtype=GRB.BINARY, name=f"z_{name}_{k}")
+                Y[L, t, k] = m.addVar(vtype=GRB.CONTINUOUS, lb=0,
+                                      ub=N_max_by_line[L], name=f"Y_{name}_{k}")
+
+    # ----------------------
     # Constraints
+    # ----------------------
     for L in LINES:
         for t in TIME_PERIODS:
+
+            allowed_k = range(MIN_CARS[L], MAX_CARS[L] + 1)
+
             # link f and N: f = N / T_cycle
             m.addConstr(f[L, t] == N[L, t] / T_cycle[L], name=f"link_f_N_{L}_{t}")
 
             # enforce exactly one length choice
-            m.addConstr(gp.quicksum(z[L, t, k] for k in LEN_OPTIONS) == 1, name=f"onehot_{L}_{t}")
+            m.addConstr(gp.quicksum(z[L, t, k] for k in allowed_k) == 1,
+                        name=f"onehot_{L}_{t}")
 
-            # link Y_k = N * z_k using big-M (M = N_max_by_line[L])
+            # linearization Y_k = N * z_k
             M = N_max_by_line[L]
-            for k in LEN_OPTIONS:
-                # Y <= M * z
+            for k in allowed_k:
                 m.addConstr(Y[L, t, k] <= M * z[L, t, k], name=f"Y_ub1_{L}_{t}_{k}")
-                # Y <= N
-                m.addConstr(Y[L, t, k] <= N[L, t], name=f"Y_ub2_{L}_{t}_{k}")
-                # Y >= N - M*(1 - z)
-                m.addConstr(Y[L, t, k] >= N[L, t] - M * (1 - z[L, t, k]), name=f"Y_lb_{L}_{t}_{k}")
-                # Y >= 0 (implicit)
+                m.addConstr(Y[L, t, k] <= N[L, t],        name=f"Y_ub2_{L}_{t}_{k}")
+                m.addConstr(Y[L, t, k] >= N[L, t] - M*(1 - z[L, t, k]),
+                            name=f"Y_lb_{L}_{t}_{k}")
 
-            # seats per hour (linear): seats_ph = (sum_k k * Y_k) * (K_car / T_cycle[L])
-            # demand per hour:
+            # seats per hour
             dem = demand_lt[t][L]
             demand_ph = dem / max(1e-9, D_ur_t[t])
-            seats_coeff = K_car / T_cycle[L]
-            seats_ph_expr = gp.quicksum(k * Y[L, t, k] for k in LEN_OPTIONS) * seats_coeff
 
-            # capacity constraint over period: seats_per_hour * hours_in_period >= demand (over period)
+            seats_coeff = K_car / T_cycle[L]
+            seats_ph_expr = gp.quicksum(k * Y[L, t, k] 
+                                        for k in allowed_k) * seats_coeff
+
+            # must meet full demand over period
             m.addConstr(seats_ph_expr * D_ur_t[t] >= dem, name=f"cap_{L}_{t}")
 
-            # empty seats per hour: E >= seats_ph - demand_ph
+            # empty seats
             m.addConstr(E[L, t] >= seats_ph_expr - demand_ph, name=f"empty_def_{L}_{t}")
-            m.addConstr(E[L, t] >= 0, name=f"empty_nonneg_{L}_{t}")
 
             # UTILIZATION CAP: demand_per_hour ≤ 80% of seats_per_hour
-            m.addConstr(
-                demand_ph <= 0.80 * seats_ph_expr,
-                name=f"util_cap_{L}_{t}"
-            )
+            m.addConstr(demand_ph <= 0.80 * seats_ph_expr, name=f"util_cap_{L}_{t}")
 
-
-            # PWL: W = 1/f => W(f) = 1/f. Use breakpoints between f_lo and f_hi
-            # create breakpoints (avoid f very close to zero, bounded by f_lo/f_hi)
+            # PWL for waiting: W = 1/f
             xs = np.linspace(f_lo, f_hi, pwl_points)
             ys = [1.0 / x for x in xs]
-            # add PWL constraint y = PWL(x)
             m.addGenConstrPWL(f[L, t], W[L, t], xs.tolist(), ys, name=f"pwl_inv_{L}_{t}")
 
-    # Fleet constraint per period (cars concurrently used) sum_k (N * k) <= Y_max
+    # ----------------------
+    # Fleet constraint
+    # ----------------------
     for t in TIME_PERIODS:
-        fleet_expr = gp.quicksum( gp.quicksum(k * Y[L, t, k] for k in LEN_OPTIONS) for L in LINES )
+        fleet_expr = gp.quicksum(
+            gp.quicksum(k * Y[L, t, k] 
+                        for k in range(MIN_CARS[L], MAX_CARS[L] + 1))
+            for L in LINES
+        )
         m.addConstr(fleet_expr <= Y_max, name=f"fleet_{t}")
 
-    # Budget (operating cost) linear: total_car_hours = sum (N * C * D_ur_t) where N*C = sum_k k * Y_k
-    total_car_hours = gp.quicksum( (gp.quicksum(k * Y[L, t, k] for k in LEN_OPTIONS)) * D_ur_t[t] for L in LINES for t in TIME_PERIODS )
+    # ----------------------
+    # Budget constraint
+    # ----------------------
+    total_car_hours = gp.quicksum(
+        gp.quicksum(k * Y[L, t, k] 
+                    for k in range(MIN_CARS[L], MAX_CARS[L] + 1)) * D_ur_t[t]
+        for L in LINES for t in TIME_PERIODS
+    )
+
     m.addConstr(C_cost * total_car_hours <= Budget, name="budget")
 
-    # Objective: waiting + empty penalty + operating cost
+    # ----------------------
+    # Objective
+    # ----------------------
     wait_terms = []
     empty_terms = []
-    for t in TIME_PERIODS:
-        for L in LINES:
+
+    for L in LINES:
+        for t in TIME_PERIODS:
             dem = demand_lt[t][L]
-            # waiting hours = dem * (1/(2f)) = dem * 0.5 * W
             wait_terms.append(w_time * dem * 0.5 * W[L, t])
-            # empty penalty over period = w_empty * E * hours_in_period
             empty_terms.append(w_empty * E[L, t] * D_ur_t[t])
 
-    obj = gp.quicksum(wait_terms) + gp.quicksum(empty_terms) + C_cost * total_car_hours
-    m.setObjective(obj, GRB.MINIMIZE)
+    m.setObjective(gp.quicksum(wait_terms) 
+                   + gp.quicksum(empty_terms) 
+                   + C_cost * total_car_hours,
+                   GRB.MINIMIZE)
 
-    # Solve
-    m.Params.TimeLimit = 600  # seconds, optional
+    # ----------------------
+    # Optimize
+    # ----------------------
+    m.Params.TimeLimit = 600
     m.optimize()
 
+    # ----------------------
     # Extract solution
+    # ----------------------
     sol = {"objective": m.ObjVal}
     sol["N"] = {(L, t): int(round(N[L, t].X)) for L in LINES for t in TIME_PERIODS}
-    # recover chosen car length per (L,t)
+
     sol["cars"] = {}
     for L in LINES:
         for t in TIME_PERIODS:
-            chosen_k = None
-            for k in LEN_OPTIONS:
-                if z[L, t, k].X > 0.5:
-                    chosen_k = k
-                    break
-            sol["cars"][(L, t)] = chosen_k if chosen_k is not None else LEN_OPTIONS[0]
-    # frequency from f var
-    sol["freq"] = {(L, t): float(f[L, t].X) for L in LINES for t in TIME_PERIODS}
+            allowed_k = range(MIN_CARS[L], MAX_CARS[L] + 1)
+            chosen = [k for k in allowed_k if z[L, t, k].X > 0.5]
+            sol["cars"][(L, t)] = chosen[0] if chosen else MIN_CARS[L]
+
+    sol["freq"] = {(L, t): f[L, t].X for L in LINES for t in TIME_PERIODS}
 
     return sol
+
 
 # -------------------------
 # RUN & SAVE

@@ -52,7 +52,7 @@ def generate_benchmark_comparison(solution_csv_path, output_path):
 if __name__ == "__main__":
     # Ensure these paths match your actual file locations
     input_csv = "./output/path_schedule_solution_summary.csv" 
-    output_csv = "./output/path_benchmark_comparison.csv"
+    output_csv = "./output/path_wait_time_comparison.csv"
     
     try:
         generate_benchmark_comparison(input_csv, output_csv)
