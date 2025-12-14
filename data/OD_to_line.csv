@@ -1,0 +1,25 @@
+﻿origin,destination,line_list,
+newark,harrison,NWK−WTC,
+harrison,newark,NWK−WTC,
+harrison,jsq,NWK−WTC,
+jsq,harrison,NWK−WTC,
+jsq,grove,NWK−WTC,JSQ−33st
+grove,jsq,NWK−WTC,JSQ−33st
+grove,exchange,NWK−WTC,
+exchange,grove,NWK−WTC,
+exchange,wtc,NWK−WTC,
+wtc,exchange,NWK−WTC,
+grove,newport,JSQ−33st,
+newport,grove,JSQ−33st,
+hoboken,newport,HOB−33st,
+newport,hoboken,HOB−33st,
+newport,chris st,JSQ−33st,HOB−33st
+chris st,newport,JSQ−33st,HOB−33st
+chris st,9 st,JSQ−33st,HOB−33st
+9 st,chris st,JSQ−33st,HOB−33st
+9 st,14 st,JSQ−33st,HOB−33st
+14 st,9 st,JSQ−33st,HOB−33st
+14 st,23 st,JSQ−33st,HOB−33st
+23 st,14 st,JSQ−33st,HOB−33st
+23 st,33 st,JSQ−33st,HOB−33st
+33 st,23 st,JSQ−33st,HOB−33st
